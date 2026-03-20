@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>XMind 转 Markdown</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>XMind 转 Markdown</h1>
+      <p class="subtitle">纯本地转换，不上传文件，不依赖后端服务。</p>
+
+      <div class="workspace">
+        <section class="panel left-panel">
+          <h2>文件导入</h2>
+          <div id="dropZone" class="drop-zone">
+            <p id="dropHint" class="drop-hint">拖拽 .xmind 文件到此处，或点击添加文件</p>
+            <label class="file-picker" for="xmindFile">
+              <span>添加 .xmind 文件</span>
+            </label>
+            <input id="xmindFile" type="file" accept=".xmind" multiple />
+          </div>
+          <p id="fileNotice" class="file-notice"></p>
+
+          <div class="batch-actions">
+            <button id="convertAllBtn" disabled>全部转换</button>
+            <button id="exportAllBtn" disabled>导出全部</button>
+            <button id="clearAllBtn" disabled>清空列表</button>
+          </div>
+
+          <p id="batchSummary" class="batch-summary">
+            总数 0 · 成功 0 · 失败 0 · 转换中 0 · 待转换 0
+          </p>
+
+          <div class="file-list-wrap">
+            <p id="fileListEmpty" class="file-list-empty">尚未导入文件</p>
+            <ul id="fileList" class="file-list"></ul>
+          </div>
+
+          <h2 class="config-title">转换配置</h2>
+          <div class="config-grid">
+            <label class="config-item" for="outputMode">
+              <span>输出结构模式</span>
+              <select id="outputMode">
+                <option value="heading">heading（标题层级）</option>
+                <option value="list">list（无序列表）</option>
+                <option value="mixed">mixed（标题 + 列表）</option>
+              </select>
+            </label>
+            <label class="config-item" for="rootMode">
+              <span>根节点处理</span>
+              <select id="rootMode">
+                <option value="keepRoot">keepRoot（保留根节点）</option>
+                <option value="ignoreRoot">ignoreRoot（忽略根节点）</option>
+              </select>
+            </label>
+            <label class="config-item" for="spacingMode">
+              <span>空行规则</span>
+              <select id="spacingMode">
+                <option value="normalSpacing">normalSpacing（常规）</option>
+                <option value="compactSpacing">compactSpacing（紧凑）</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="config-checks">
+            <label class="checkbox"><input id="includeNotes" type="checkbox" checked />包含备注</label>
+            <label class="checkbox"><input id="includeLabels" type="checkbox" checked />包含 Labels</label>
+            <label class="checkbox"><input id="includeLinks" type="checkbox" checked />包含 Links</label>
+            <label class="checkbox"><input id="includeMarkers" type="checkbox" checked />包含 Markers</label>
+          </div>
+        </section>
+
+        <section class="panel right-panel">
+          <div class="result-top">
+            <div>
+              <h2 id="currentFileTitle">当前文件</h2>
+              <p id="currentFileState" class="status-text">请选择左侧待查看文件</p>
+            </div>
+            <div class="result-actions">
+              <button id="copyBtn" disabled>复制</button>
+              <button id="downloadBtn" disabled>下载 .md</button>
+            </div>
+          </div>
+
+          <div class="view-switch">
+            <button id="sourceModeBtn" class="view-btn active">源码</button>
+            <button id="previewModeBtn" class="view-btn">预览</button>
+          </div>
+
+          <p id="actionNotice" class="action-notice" aria-live="polite"></p>
+
+          <div id="statsPanel" class="stats-panel" hidden>
+            <span>文件名：<strong id="statFileName"></strong></span>
+            <span>节点数：<strong id="statNodeCount">0</strong></span>
+            <span>备注数：<strong id="statNoteCount">0</strong></span>
+            <span>Markdown 行数：<strong id="statLineCount">0</strong></span>
+          </div>
+
+          <div id="resultPlaceholder" class="result-placeholder">请选择左侧待查看文件</div>
+          <textarea
+            id="markdownOutput"
+            class="result-source"
+            placeholder="转换结果会显示在这里..."
+            readonly
+            hidden
+          ></textarea>
+          <div id="markdownPreview" class="markdown-preview" hidden></div>
+        </section>
+      </div>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
