@@ -1,4 +1,6 @@
 # XMind to Markdown (macOS Desktop)
+<img width="1220" height="820" alt="image" src="https://github.com/user-attachments/assets/b3ff2dbe-635d-41c8-8f05-f33fbaca7f79" />
+
 
 一个纯本地运行的 XMind 转 Markdown 工具（Electron 桌面应用）。
 
