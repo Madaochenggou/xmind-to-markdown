@@ -23,8 +23,18 @@ function createWindow() {
 
 function sanitizeFileBaseName(fileName) {
   const parsed = path.parse(String(fileName || "mindmap.xmind")).name || "mindmap";
-  const sanitized = parsed.replace(/[\\/:*?"<>|]/g, "_").trim();
-  return sanitized || "mindmap";
+  const sanitized = parsed
+    .normalize("NFKC")
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .trim();
+
+  if (!sanitized) return "mindmap";
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(sanitized)) {
+    return `${sanitized}_file`;
+  }
+  return sanitized;
 }
 
 function resolveUniqueMarkdownPath(directoryPath, baseName) {
@@ -57,16 +67,21 @@ ipcMain.handle("pick-export-directory", async () => {
 ipcMain.handle("export-markdown-files", async (_event, payload) => {
   const directoryPath = typeof payload?.directoryPath === "string" ? payload.directoryPath : "";
   const files = Array.isArray(payload?.files) ? payload.files : [];
+  const indexFile = payload?.indexFile || null;
 
   let writtenCount = 0;
   let failedCount = 0;
   const failedFiles = [];
+  let indexWritten = false;
+  let indexError = "";
 
   if (!directoryPath) {
     return {
       writtenCount,
       failedCount: files.length,
       failedFiles: files.map((item) => String(item?.fileName || "未命名文件")),
+      indexWritten,
+      indexError,
     };
   }
 
@@ -86,7 +101,20 @@ ipcMain.handle("export-markdown-files", async (_event, payload) => {
     }
   }
 
-  return { writtenCount, failedCount, failedFiles };
+  if (indexFile && typeof indexFile.markdown === "string") {
+    try {
+      const indexName = String(indexFile.fileName || "index.md");
+      const baseName = sanitizeFileBaseName(indexName);
+      const outputPath = resolveUniqueMarkdownPath(directoryPath, baseName);
+      await fs.promises.writeFile(outputPath, String(indexFile.markdown || ""), "utf-8");
+      indexWritten = true;
+    } catch (error) {
+      console.error("[xmind2md] export index failed:", error);
+      indexError = "index_write_failed";
+    }
+  }
+
+  return { writtenCount, failedCount, failedFiles, indexWritten, indexError };
 });
 
 app.whenReady().then(() => {

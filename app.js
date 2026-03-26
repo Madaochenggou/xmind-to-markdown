@@ -8,11 +8,44 @@ const DEFAULT_OPTIONS = Object.freeze({
   includeLabels: true,
   includeLinks: true,
   includeMarkers: true,
+  exportTemplate: "standard",
+  includeFrontMatter: false,
+  includeCheckReport: false,
+  exportIndexFile: true,
 });
 
 const VALID_OUTPUT_MODES = new Set(["heading", "list", "mixed"]);
 const VALID_ROOT_MODES = new Set(["keepRoot", "ignoreRoot"]);
 const VALID_SPACING_MODES = new Set(["normalSpacing", "compactSpacing"]);
+const VALID_EXPORT_TEMPLATES = new Set(["standard", "outline", "document", "test-analysis"]);
+
+const TEMPLATE_RECOMMENDED_OPTIONS = Object.freeze({
+  standard: {},
+  outline: {
+    outputMode: "list",
+    rootMode: "ignoreRoot",
+    spacingMode: "compactSpacing",
+    includeNotes: false,
+  },
+  document: {
+    outputMode: "heading",
+    rootMode: "keepRoot",
+    spacingMode: "normalSpacing",
+    includeNotes: true,
+  },
+  "test-analysis": {
+    outputMode: "mixed",
+    rootMode: "keepRoot",
+    spacingMode: "normalSpacing",
+    includeNotes: true,
+  },
+});
+
+const CHECK_RULES = Object.freeze({
+  maxDepth: 6,
+  maxTextLength: 200,
+  isolatedAddonThreshold: 3,
+});
 
 const FILE_STATUS_LABEL = {
   pending: "待转换",
@@ -46,6 +79,16 @@ const MESSAGE = {
   exportPartialFailed: "导出完成，部分文件写入失败",
   exportCanceled: "已取消导出",
   listCleared: "文件列表已清空",
+  templateChanged: "模板已切换，可按需应用模板默认设置",
+  templateDefaultsApplied: "已应用模板推荐配置",
+  checkNoIssues: "检查完成，未发现明显问题",
+  checkIssuesFound: "检查完成，发现 {count} 条提醒",
+  checkPending: "等待转换后显示检查结果",
+  checkConverting: "正在检查中，请稍候...",
+  checkError: "转换失败，暂无检查结果",
+  checkNoSelection: "请选择左侧待查看文件",
+  exportWithIndexFailed: "导出完成，索引文件生成失败",
+  fileNameSanitized: "文件名无效，已自动处理",
 };
 
 const ERROR_CODE = {
@@ -70,10 +113,15 @@ const elements = {
   outputMode: document.getElementById("outputMode"),
   rootMode: document.getElementById("rootMode"),
   spacingMode: document.getElementById("spacingMode"),
+  exportTemplate: document.getElementById("exportTemplate"),
+  applyTemplateDefaultsBtn: document.getElementById("applyTemplateDefaultsBtn"),
   includeNotes: document.getElementById("includeNotes"),
   includeLabels: document.getElementById("includeLabels"),
   includeLinks: document.getElementById("includeLinks"),
   includeMarkers: document.getElementById("includeMarkers"),
+  includeFrontMatter: document.getElementById("includeFrontMatter"),
+  includeCheckReport: document.getElementById("includeCheckReport"),
+  exportIndexFile: document.getElementById("exportIndexFile"),
   currentFileTitle: document.getElementById("currentFileTitle"),
   currentFileState: document.getElementById("currentFileState"),
   copyBtn: document.getElementById("copyBtn"),
@@ -89,6 +137,9 @@ const elements = {
   resultPlaceholder: document.getElementById("resultPlaceholder"),
   markdownOutput: document.getElementById("markdownOutput"),
   markdownPreview: document.getElementById("markdownPreview"),
+  checkSummary: document.getElementById("checkSummary"),
+  checkEmpty: document.getElementById("checkEmpty"),
+  checkIssueList: document.getElementById("checkIssueList"),
 };
 
 const state = {
@@ -149,6 +200,12 @@ function bindEvents() {
   elements.sourceModeBtn.addEventListener("click", () => setResultViewMode("source"));
   elements.previewModeBtn.addEventListener("click", () => setResultViewMode("preview"));
 
+  elements.exportTemplate.addEventListener("change", (event) => {
+    updateConvertOption("exportTemplate", event.target.value);
+    showActionNotice(MESSAGE.templateChanged, "info");
+  });
+  elements.applyTemplateDefaultsBtn.addEventListener("click", handleApplyTemplateDefaults);
+
   elements.outputMode.addEventListener("change", (event) => {
     updateConvertOption("outputMode", event.target.value);
   });
@@ -169,6 +226,15 @@ function bindEvents() {
   });
   elements.includeMarkers.addEventListener("change", (event) => {
     updateConvertOption("includeMarkers", event.target.checked);
+  });
+  elements.includeFrontMatter.addEventListener("change", (event) => {
+    updateConvertOption("includeFrontMatter", event.target.checked);
+  });
+  elements.includeCheckReport.addEventListener("change", (event) => {
+    updateConvertOption("includeCheckReport", event.target.checked);
+  });
+  elements.exportIndexFile.addEventListener("change", (event) => {
+    updateConvertOption("exportIndexFile", event.target.checked);
   });
 }
 
@@ -251,6 +317,8 @@ function createFileItem(file) {
     markdown: "",
     stats: undefined,
     errorMessage: "",
+    checkIssues: [],
+    hasWarnings: false,
   };
 }
 
@@ -332,6 +400,8 @@ async function handleConvertAll() {
       markdown: "",
       stats: undefined,
       errorMessage: "",
+      checkIssues: [],
+      hasWarnings: false,
     });
     renderUI();
 
@@ -342,6 +412,8 @@ async function handleConvertAll() {
         markdown: result.markdown,
         stats: result.stats,
         errorMessage: "",
+        checkIssues: result.checkIssues,
+        hasWarnings: result.hasWarnings,
       });
     } catch (error) {
       console.error("[xmind2md] convert failed:", error);
@@ -350,6 +422,8 @@ async function handleConvertAll() {
         markdown: "",
         stats: undefined,
         errorMessage: mapErrorToUserMessage(error),
+        checkIssues: [],
+        hasWarnings: false,
       });
     }
 
@@ -359,10 +433,13 @@ async function handleConvertAll() {
   state.isBatchConverting = false;
 
   const summary = buildBatchSummary();
+  const warningSegment =
+    summary.warningFiles > 0 ? `，提醒文件 ${summary.warningFiles}` : "";
+
   if (summary.error > 0) {
-    setFileNotice(`转换完成：成功 ${summary.success}，失败 ${summary.error}`, "info");
+    setFileNotice(`转换完成：成功 ${summary.success}，失败 ${summary.error}${warningSegment}`, "info");
   } else {
-    setFileNotice(`转换完成：成功 ${summary.success} 个文件`, "success");
+    setFileNotice(`转换完成：成功 ${summary.success} 个文件${warningSegment}`, "success");
   }
 
   renderUI();
@@ -385,8 +462,12 @@ function handleDownloadCurrent() {
   const current = getSelectedFileItem();
   if (!current || current.status !== "success" || !current.markdown) return;
 
-  const fileBaseName = current.fileName.replace(/\.xmind$/i, "") || "mindmap";
-  const blob = new Blob([current.markdown], { type: "text/markdown;charset=utf-8" });
+  const exportedMarkdown = buildExportMarkdown(current, state.convertOptions, {
+    generatedAt: new Date().toISOString(),
+  });
+  const fileNameAdjusted = isFileNameAdjusted(current.fileName);
+  const fileBaseName = sanitizeMarkdownBaseName(current.fileName);
+  const blob = new Blob([exportedMarkdown], { type: "text/markdown;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -395,7 +476,11 @@ function handleDownloadCurrent() {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
-  showActionNotice(MESSAGE.downloadDone, "success");
+  if (fileNameAdjusted) {
+    showActionNotice(`${MESSAGE.downloadDone}（${MESSAGE.fileNameSanitized}）`, "success");
+  } else {
+    showActionNotice(MESSAGE.downloadDone, "success");
+  }
 }
 
 async function handleExportAll() {
@@ -422,22 +507,51 @@ async function handleExportAll() {
       return;
     }
 
+    const generatedAt = new Date().toISOString();
+    const exportFiles = successItems.map((item) => ({
+      fileName: item.fileName,
+      markdown: buildExportMarkdown(item, state.convertOptions, { generatedAt }),
+    }));
+
+    let indexFile = null;
+    if (state.convertOptions.exportIndexFile) {
+      const indexMarkdown = buildBatchIndexMarkdown(state.fileItems, generatedAt);
+      if (indexMarkdown) {
+        indexFile = {
+          fileName: "index.md",
+          markdown: indexMarkdown,
+        };
+      }
+    }
+
     const payload = {
       directoryPath: picked.directoryPath,
-      files: successItems.map((item) => ({
-        fileName: item.fileName,
-        markdown: item.markdown,
-      })),
+      files: exportFiles,
+      indexFile,
     };
 
     const result = await window.electronAPI.exportMarkdownFiles(payload);
     const writtenCount = Number(result?.writtenCount || 0);
     const failedCount = Number(result?.failedCount || 0);
+    const indexFailed = Boolean(indexFile) && !result?.indexWritten;
 
-    if (failedCount > 0) {
+    const hasAdjustedName = successItems.some((item) => isFileNameAdjusted(item.fileName));
+
+    if (failedCount > 0 && indexFailed) {
+      setFileNotice(
+        `已导出 ${writtenCount} 个文件，${failedCount} 个失败文件未导出；索引文件生成失败`,
+        "info"
+      );
+    } else if (failedCount > 0) {
       setFileNotice(`已导出 ${writtenCount} 个文件，${failedCount} 个失败文件未导出`, "info");
+    } else if (indexFailed) {
+      setFileNotice(MESSAGE.exportWithIndexFailed, "info");
     } else {
       setFileNotice(`已导出 ${writtenCount} 个文件`, "success");
+    }
+
+    if (hasAdjustedName) {
+      setFileNotice(`${state.fileNotice.text}；${MESSAGE.fileNameSanitized}`, state.fileNotice.tone || "info");
     }
   } catch (error) {
     console.error("[xmind2md] export failed:", error);
@@ -453,6 +567,144 @@ function canUseElectronExport() {
       typeof window.electronAPI.pickExportDirectory === "function" &&
       typeof window.electronAPI.exportMarkdownFiles === "function"
   );
+}
+
+function buildExportMarkdown(item, options, context = {}) {
+  const safeOptions = sanitizeConvertOptions(options);
+  const generatedAt =
+    typeof context.generatedAt === "string" && context.generatedAt ? context.generatedAt : new Date().toISOString();
+
+  const blocks = [];
+
+  if (safeOptions.includeFrontMatter) {
+    try {
+      blocks.push(buildFrontMatter(item, safeOptions, generatedAt));
+    } catch (error) {
+      console.warn("[xmind2md] front matter skipped:", error);
+    }
+  }
+
+  blocks.push(String(item?.markdown || "").trimEnd());
+
+  if (safeOptions.includeCheckReport) {
+    try {
+      const report = buildCheckReportMarkdown(item?.checkIssues || []);
+      if (report) {
+        blocks.push(report);
+      }
+    } catch (error) {
+      console.warn("[xmind2md] check report skipped:", error);
+    }
+  }
+
+  const output = blocks.filter(Boolean).join("\n\n").trimEnd();
+  return output ? `${output}\n` : "";
+}
+
+function buildFrontMatter(item, options, generatedAt) {
+  const title = deriveExportTitle(item);
+  const stats = item?.stats || {};
+
+  const rows = [
+    "---",
+    `title: ${toYamlString(title)}`,
+    `template: ${toYamlString(options.exportTemplate || "standard")}`,
+    `nodeCount: ${Number(stats.nodeCount || 0)}`,
+    `noteCount: ${Number(stats.noteCount || 0)}`,
+    `generatedAt: ${toYamlString(generatedAt)}`,
+    `sourceFile: ${toYamlString(String(item?.fileName || "mindmap.xmind"))}`,
+    "---",
+  ];
+
+  return rows.join("\n");
+}
+
+function deriveExportTitle(item) {
+  const fileName = String(item?.fileName || "");
+  const base = fileName.replace(/\.xmind$/i, "").trim();
+  return base || "Untitled";
+}
+
+function toYamlString(value) {
+  return `"${String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')}"`;
+}
+
+function buildCheckReportMarkdown(checkIssues) {
+  const issues = Array.isArray(checkIssues) ? checkIssues : [];
+  if (issues.length === 0) return "";
+
+  const lines = ["## 检查结果"];
+  for (const issue of issues) {
+    const pathSuffix = issue.nodePath ? `（${issue.nodePath}）` : "";
+    lines.push(`- ${issue.severity}：${issue.message}${pathSuffix}`);
+  }
+  return lines.join("\n");
+}
+
+function buildBatchIndexMarkdown(fileItems, generatedAt) {
+  const items = Array.isArray(fileItems) ? fileItems : [];
+  const successItems = items.filter((item) => item.status === "success");
+  const failedItems = items.filter((item) => item.status === "error");
+  const warningItems = items.filter((item) => item.hasWarnings);
+
+  const lines = [
+    "# 批量导出索引",
+    "",
+    `- 导出时间：${generatedAt}`,
+    `- 文件总数：${items.length}`,
+    `- 成功数：${successItems.length}`,
+    `- 失败数：${failedItems.length}`,
+    `- warning 文件数：${warningItems.length}`,
+  ];
+
+  if (successItems.length > 0) {
+    lines.push("", "## 成功文件");
+    for (const item of successItems) {
+      const stats = item.stats || {};
+      const warningCount = (item.checkIssues || []).filter((issue) => issue.severity === "warning").length;
+      lines.push(
+        `- ${item.fileName}（节点 ${Number(stats.nodeCount || 0)}，备注 ${Number(stats.noteCount || 0)}，行数 ${Number(stats.lineCount || 0)}，warning ${warningCount}）`
+      );
+    }
+  }
+
+  if (failedItems.length > 0) {
+    lines.push("", "## 失败文件");
+    for (const item of failedItems) {
+      lines.push(`- ${item.fileName}：${item.errorMessage || MESSAGE.convertFailed}`);
+    }
+  }
+
+  if (warningItems.length > 0) {
+    lines.push("", "## 含提醒文件");
+    for (const item of warningItems) {
+      const warningCount = (item.checkIssues || []).filter((issue) => issue.severity === "warning").length;
+      lines.push(`- ${item.fileName}：${warningCount} 条 warning`);
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function sanitizeMarkdownBaseName(fileName) {
+  const base = String(fileName || "mindmap")
+    .replace(/\.xmind$/i, "")
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .trim();
+  return base || "mindmap";
+}
+
+function isFileNameAdjusted(fileName) {
+  return sanitizeMarkdownBaseName(fileName) !== getRawMarkdownBaseName(fileName);
+}
+
+function getRawMarkdownBaseName(fileName) {
+  const base = String(fileName || "mindmap").replace(/\.xmind$/i, "").trim();
+  return base || "mindmap";
 }
 
 function setResultViewMode(mode) {
@@ -503,6 +755,20 @@ function updateConvertOption(key, value) {
     [key]: value,
   });
   saveConvertOptions(state.convertOptions);
+  applyOptionsToForm();
+  renderUI();
+}
+
+function handleApplyTemplateDefaults() {
+  const template = state.convertOptions.exportTemplate;
+  const patch = TEMPLATE_RECOMMENDED_OPTIONS[template] || {};
+  state.convertOptions = sanitizeConvertOptions({
+    ...state.convertOptions,
+    ...patch,
+  });
+  saveConvertOptions(state.convertOptions);
+  applyOptionsToForm();
+  showActionNotice(MESSAGE.templateDefaultsApplied, "success");
   renderUI();
 }
 
@@ -531,6 +797,7 @@ function buildBatchSummary() {
     error: 0,
     converting: 0,
     pending: 0,
+    warningFiles: 0,
   };
 
   for (const item of state.fileItems) {
@@ -538,6 +805,8 @@ function buildBatchSummary() {
     else if (item.status === "error") summary.error += 1;
     else if (item.status === "converting") summary.converting += 1;
     else summary.pending += 1;
+
+    if (item.hasWarnings) summary.warningFiles += 1;
   }
 
   return summary;
@@ -559,7 +828,7 @@ function renderFileNotice() {
 
 function renderBatchSummary() {
   const summary = buildBatchSummary();
-  elements.batchSummary.textContent = `总数 ${summary.total} · 成功 ${summary.success} · 失败 ${summary.error} · 转换中 ${summary.converting} · 待转换 ${summary.pending}`;
+  elements.batchSummary.textContent = `总数 ${summary.total} · 成功 ${summary.success} · 失败 ${summary.error} · 转换中 ${summary.converting} · 待转换 ${summary.pending} · 提醒文件 ${summary.warningFiles}`;
 }
 
 function renderFileList() {
@@ -575,6 +844,12 @@ function renderFileList() {
   const rows = state.fileItems.map((item) => {
     const selectedClass = item.id === state.selectedFileId ? "selected" : "";
     const canPreview = item.status === "success" ? "可预览" : "不可预览";
+    const issues = Array.isArray(item.checkIssues) ? item.checkIssues : [];
+    const warningCount = issues.filter((issue) => issue.severity === "warning").length;
+    const warningFlag =
+      item.hasWarnings && warningCount > 0
+        ? `<span class="warning-flag">提醒 ${warningCount}</span>`
+        : "";
     const errorHtml =
       item.status === "error" && item.errorMessage
         ? `<div class="file-error">${escapeHtml(item.errorMessage)}</div>`
@@ -587,6 +862,7 @@ function renderFileList() {
           <div class="file-meta">
             <span class="status-badge ${escapeHtml(item.status)}">${escapeHtml(FILE_STATUS_LABEL[item.status] || item.status)}</span>
             <span class="preview-flag">${canPreview}</span>
+            ${warningFlag}
           </div>
           ${errorHtml}
         </div>
@@ -632,10 +908,15 @@ function renderOptionsDisabledState() {
   elements.outputMode.disabled = disabled;
   elements.rootMode.disabled = disabled;
   elements.spacingMode.disabled = disabled;
+  elements.exportTemplate.disabled = disabled;
+  elements.applyTemplateDefaultsBtn.disabled = disabled;
   elements.includeNotes.disabled = disabled;
   elements.includeLabels.disabled = disabled;
   elements.includeLinks.disabled = disabled;
   elements.includeMarkers.disabled = disabled;
+  elements.includeFrontMatter.disabled = disabled;
+  elements.includeCheckReport.disabled = disabled;
+  elements.exportIndexFile.disabled = disabled;
   elements.fileInput.disabled = false;
 }
 
@@ -650,6 +931,7 @@ function renderCurrentPane() {
     elements.currentFileState.className = "status-text";
     elements.statsPanel.hidden = true;
     showPlaceholder(MESSAGE.noSelection);
+    renderCheckIssuesPane(null, "empty");
     updateViewModeButtons();
     return;
   }
@@ -661,6 +943,7 @@ function renderCurrentPane() {
     elements.currentFileState.className = "status-text";
     elements.statsPanel.hidden = true;
     showPlaceholder(MESSAGE.pending);
+    renderCheckIssuesPane(current, "pending");
     updateViewModeButtons();
     return;
   }
@@ -670,6 +953,7 @@ function renderCurrentPane() {
     elements.currentFileState.className = "status-text";
     elements.statsPanel.hidden = true;
     showPlaceholder(MESSAGE.converting);
+    renderCheckIssuesPane(current, "converting");
     updateViewModeButtons();
     return;
   }
@@ -679,6 +963,7 @@ function renderCurrentPane() {
     elements.currentFileState.className = "status-text error";
     elements.statsPanel.hidden = true;
     showPlaceholder(current.errorMessage || MESSAGE.convertFailed, "error");
+    renderCheckIssuesPane(current, "error");
     updateViewModeButtons();
     return;
   }
@@ -695,6 +980,7 @@ function renderCurrentPane() {
     elements.markdownOutput.value = current.markdown;
   }
 
+  renderCheckIssuesPane(current, "success");
   updateViewModeButtons();
 }
 
@@ -717,6 +1003,71 @@ function updateViewModeButtons() {
   elements.previewModeBtn.classList.toggle("active", state.resultViewMode === "preview");
 }
 
+function renderCheckIssuesPane(current, paneStatus) {
+  elements.checkIssueList.innerHTML = "";
+  elements.checkIssueList.hidden = true;
+
+  if (!current || paneStatus === "empty") {
+    elements.checkSummary.textContent = "暂无检查结果";
+    elements.checkEmpty.textContent = MESSAGE.checkNoSelection;
+    elements.checkEmpty.hidden = false;
+    return;
+  }
+
+  if (paneStatus === "pending") {
+    elements.checkSummary.textContent = "暂无检查结果";
+    elements.checkEmpty.textContent = MESSAGE.checkPending;
+    elements.checkEmpty.hidden = false;
+    return;
+  }
+
+  if (paneStatus === "converting") {
+    elements.checkSummary.textContent = "检查中";
+    elements.checkEmpty.textContent = MESSAGE.checkConverting;
+    elements.checkEmpty.hidden = false;
+    return;
+  }
+
+  if (paneStatus === "error") {
+    elements.checkSummary.textContent = "暂无检查结果";
+    elements.checkEmpty.textContent = MESSAGE.checkError;
+    elements.checkEmpty.hidden = false;
+    return;
+  }
+
+  const issues = Array.isArray(current.checkIssues) ? current.checkIssues : [];
+  if (issues.length === 0) {
+    elements.checkSummary.textContent = MESSAGE.checkNoIssues;
+    elements.checkEmpty.textContent = "未发现需要关注的问题";
+    elements.checkEmpty.hidden = false;
+    return;
+  }
+
+  const warningCount = issues.filter((issue) => issue.severity === "warning").length;
+  elements.checkSummary.textContent = MESSAGE.checkIssuesFound.replace("{count}", String(issues.length));
+  elements.checkEmpty.hidden = true;
+  elements.checkIssueList.hidden = false;
+
+  elements.checkIssueList.innerHTML = issues
+    .map((issue) => {
+      const pathHtml = issue.nodePath
+        ? `<div class="check-node-path">节点路径：${escapeHtml(issue.nodePath)}</div>`
+        : "";
+      return `
+        <li class="check-issue-item">
+          <span class="check-severity ${escapeHtml(issue.severity)}">${escapeHtml(issue.severity)}</span>
+          <span class="check-message">${escapeHtml(issue.message)}</span>
+          ${pathHtml}
+        </li>
+      `;
+    })
+    .join("");
+
+  if (warningCount > 0) {
+    elements.checkSummary.textContent += `（warning ${warningCount}）`;
+  }
+}
+
 function renderStats(stats) {
   if (!stats) {
     elements.statsPanel.hidden = true;
@@ -731,6 +1082,7 @@ function renderStats(stats) {
 }
 
 function applyOptionsToForm() {
+  elements.exportTemplate.value = state.convertOptions.exportTemplate;
   elements.outputMode.value = state.convertOptions.outputMode;
   elements.rootMode.value = state.convertOptions.rootMode;
   elements.spacingMode.value = state.convertOptions.spacingMode;
@@ -738,6 +1090,9 @@ function applyOptionsToForm() {
   elements.includeLabels.checked = state.convertOptions.includeLabels;
   elements.includeLinks.checked = state.convertOptions.includeLinks;
   elements.includeMarkers.checked = state.convertOptions.includeMarkers;
+  elements.includeFrontMatter.checked = state.convertOptions.includeFrontMatter;
+  elements.includeCheckReport.checked = state.convertOptions.includeCheckReport;
+  elements.exportIndexFile.checked = state.convertOptions.exportIndexFile;
 }
 
 function loadConvertOptions() {
@@ -783,6 +1138,18 @@ function sanitizeConvertOptions(options) {
   }
   if (typeof options?.includeMarkers === "boolean") {
     next.includeMarkers = options.includeMarkers;
+  }
+  if (VALID_EXPORT_TEMPLATES.has(options?.exportTemplate)) {
+    next.exportTemplate = options.exportTemplate;
+  }
+  if (typeof options?.includeFrontMatter === "boolean") {
+    next.includeFrontMatter = options.includeFrontMatter;
+  }
+  if (typeof options?.includeCheckReport === "boolean") {
+    next.includeCheckReport = options.includeCheckReport;
+  }
+  if (typeof options?.exportIndexFile === "boolean") {
+    next.exportIndexFile = options.exportIndexFile;
   }
 
   return next;
@@ -862,6 +1229,14 @@ async function convertXmindToMarkdown(file, options) {
     throw createAppError(ERROR_CODE.NO_CONTENT);
   }
 
+  let checkIssues = [];
+  try {
+    checkIssues = runRuleChecks(renderableSheets);
+  } catch (error) {
+    console.warn("[xmind2md] check rules failed, skipped:", error);
+    checkIssues = [];
+  }
+
   let markdown = "";
   try {
     markdown = sheetsToMarkdown(renderableSheets, options);
@@ -876,6 +1251,8 @@ async function convertXmindToMarkdown(file, options) {
   return {
     markdown,
     stats: buildConvertStats(renderableSheets, file.name, markdown),
+    checkIssues,
+    hasWarnings: checkIssues.some((issue) => issue.severity === "warning"),
   };
 }
 
@@ -921,6 +1298,115 @@ function buildConvertStats(sheets, fileName, markdown) {
   };
 }
 
+function runRuleChecks(sheets) {
+  const issues = [];
+  let issueCounter = 0;
+
+  const pushIssue = (severity, message, nodePath = "") => {
+    issueCounter += 1;
+    issues.push({
+      id: `issue_${issueCounter}`,
+      severity,
+      message,
+      nodePath,
+    });
+  };
+
+  for (const sheet of sheets) {
+    const sheetPath = stringValue(sheet.title) || "Untitled Sheet";
+    checkDuplicateSiblingTitles(sheet.nodes, sheetPath, pushIssue);
+
+    for (const node of sheet.nodes || []) {
+      runChecksForNode(node, 1, [sheetPath], pushIssue);
+    }
+  }
+
+  return issues;
+}
+
+function runChecksForNode(node, depth, parentPath, pushIssue) {
+  const nodeLabel = nodeTitleForPath(node);
+  const currentPath = parentPath.concat(nodeLabel);
+  const nodePath = currentPath.join(" > ");
+  const nodeRawTitle = stringValue(node.rawTitle);
+  const nodeText = stringValue(node.rawTitle || node.title);
+
+  if (!nodeRawTitle) {
+    pushIssue("warning", "发现空标题节点", nodePath);
+  }
+
+  if (depth > CHECK_RULES.maxDepth) {
+    pushIssue("warning", `节点层级超过 ${CHECK_RULES.maxDepth} 层`, nodePath);
+  }
+
+  if (nodeText.length > CHECK_RULES.maxTextLength) {
+    pushIssue("info", `节点文本较长（超过 ${CHECK_RULES.maxTextLength} 字）`, nodePath);
+  }
+
+  if (node.notePresent && !stringValue(node.notes)) {
+    pushIssue("warning", "发现空备注节点", nodePath);
+  }
+
+  if (node.link && !isLikelyValidLink(node.link)) {
+    pushIssue("warning", "链接格式可能无效", nodePath);
+  }
+
+  const children = Array.isArray(node.children) ? node.children : [];
+  checkDuplicateSiblingTitles(children, nodePath, pushIssue);
+
+  const addonCount = countNodeAddonTypes(node);
+  if (children.length === 0 && addonCount >= CHECK_RULES.isolatedAddonThreshold) {
+    pushIssue("info", "孤立节点包含较多附加信息，建议确认结构是否完整", nodePath);
+  }
+
+  for (const child of children) {
+    runChecksForNode(child, depth + 1, currentPath, pushIssue);
+  }
+}
+
+function checkDuplicateSiblingTitles(nodes, parentPath, pushIssue) {
+  const titleMap = new Map();
+
+  for (const node of nodes || []) {
+    const raw = stringValue(node.rawTitle || node.title).toLowerCase();
+    if (!raw) continue;
+    const list = titleMap.get(raw) || [];
+    list.push(node);
+    titleMap.set(raw, list);
+  }
+
+  for (const group of titleMap.values()) {
+    if (group.length < 2) continue;
+    const title = nodeTitleForPath(group[0]);
+    pushIssue("warning", `同级节点标题重复：${title}`, parentPath);
+  }
+}
+
+function countNodeAddonTypes(node) {
+  let count = 0;
+  if (Array.isArray(node.labels) && node.labels.length > 0) count += 1;
+  if (Array.isArray(node.markers) && node.markers.length > 0) count += 1;
+  if (node.link) count += 1;
+  if (stringValue(node.notes)) count += 1;
+  return count;
+}
+
+function nodeTitleForPath(node) {
+  const raw = stringValue(node?.rawTitle);
+  if (raw) return raw;
+  const fallback = stringValue(node?.title);
+  if (fallback && fallback !== "Untitled") return fallback;
+  return "(空标题)";
+}
+
+function isLikelyValidLink(link) {
+  const raw = String(link || "").trim();
+  if (!raw) return false;
+  if (/^(https?:\/\/|mailto:|file:\/\/|xmind:|ftp:\/\/)/i.test(raw)) return true;
+  if (/^www\.[^\s]+\.[^\s]+$/i.test(raw)) return true;
+  return false;
+}
+
 function walkNode(node, onVisit) {
   if (!node) return;
   onVisit(node);
@@ -940,7 +1426,7 @@ function sheetsToMarkdown(sheets, options) {
     .map((sheet, index) => renderSheetMarkdown(sheet, index, options))
     .filter(Boolean);
 
-  const separator = options.spacingMode === "compactSpacing" ? "\n---\n" : "\n\n---\n\n";
+  const separator = resolveSheetSeparator(options);
   return `${blocks.join(separator)}\n`;
 }
 
@@ -967,7 +1453,7 @@ function renderSheetMarkdown(sheet, index, options) {
 function renderHeadingMode(nodes, depth, lines, options) {
   for (const node of nodes) {
     const level = Math.min(6, depth + 2);
-    lines.push(`${"#".repeat(level)} ${escapeMarkdown(node.title || "Untitled")}`);
+    lines.push(`${"#".repeat(level)} ${formatNodeTitle(node, options)}`);
     appendNodeAddonLines(lines, node, options, { mode: "heading", depth });
 
     if (options.spacingMode === "normalSpacing") {
@@ -989,7 +1475,7 @@ function renderListMode(nodes, depth, lines, options) {
 
 function writeListNode(node, depth, lines, options) {
   const indent = "  ".repeat(depth);
-  lines.push(`${indent}- ${escapeMarkdown(node.title || "Untitled")}`);
+  lines.push(`${indent}- ${formatNodeTitle(node, options)}`);
   appendNodeAddonLines(lines, node, options, { mode: "list", depth });
 
   for (const child of node.children || []) {
@@ -1006,7 +1492,7 @@ function renderMixedMode(nodes, depth, lines, options) {
 function writeMixedNode(node, depth, lines, options) {
   if (depth <= 1) {
     const level = Math.min(6, depth + 2);
-    lines.push(`${"#".repeat(level)} ${escapeMarkdown(node.title || "Untitled")}`);
+    lines.push(`${"#".repeat(level)} ${formatNodeTitle(node, options)}`);
     appendNodeAddonLines(lines, node, options, { mode: "heading", depth });
     if (options.spacingMode === "normalSpacing") {
       lines.push("");
@@ -1014,7 +1500,7 @@ function writeMixedNode(node, depth, lines, options) {
   } else {
     const listDepth = depth - 2;
     const indent = "  ".repeat(listDepth);
-    lines.push(`${indent}- ${escapeMarkdown(node.title || "Untitled")}`);
+    lines.push(`${indent}- ${formatNodeTitle(node, options)}`);
     appendNodeAddonLines(lines, node, options, { mode: "list", depth: listDepth });
   }
 
@@ -1025,30 +1511,98 @@ function writeMixedNode(node, depth, lines, options) {
 
 function appendNodeAddonLines(lines, node, options, context) {
   const prefix = context.mode === "list" ? "  ".repeat(context.depth + 1) : "";
+  const labels = getTemplateAddonLabels(options.exportTemplate);
 
   if (options.includeLabels && Array.isArray(node.labels) && node.labels.length > 0) {
-    const labels = node.labels.map((label) => escapeMarkdown(label)).join(", ");
-    lines.push(`${prefix}Tags: ${labels}`);
+    const labelText = node.labels.map((label) => escapeMarkdown(label)).join(", ");
+    if (options.exportTemplate === "outline") {
+      lines.push(`${prefix}[标签] ${labelText}`);
+    } else {
+      lines.push(`${prefix}${labels.labels}${labelText}`);
+    }
   }
 
   if (options.includeMarkers && Array.isArray(node.markers) && node.markers.length > 0) {
-    const markers = node.markers.map((marker) => escapeMarkdown(marker)).join(", ");
-    lines.push(`${prefix}标记：${markers}`);
+    const markerText = node.markers.map((marker) => escapeMarkdown(marker)).join(", ");
+    if (options.exportTemplate === "outline") {
+      lines.push(`${prefix}[标记] ${markerText}`);
+    } else {
+      lines.push(`${prefix}${labels.markers}${markerText}`);
+    }
   }
 
   if (options.includeLinks && node.link) {
     const link = toMarkdownLink(node.link);
     if (link) {
-      lines.push(`${prefix}链接：[打开链接](${link})`);
+      if (options.exportTemplate === "outline") {
+        lines.push(`${prefix}[链接](${link})`);
+      } else {
+        lines.push(`${prefix}${labels.links}[打开链接](${link})`);
+      }
     }
   }
 
   if (options.includeNotes && node.notes) {
     const noteLines = splitNoteLines(node.notes);
     for (const note of noteLines) {
-      lines.push(`${prefix}> 备注：${escapeMarkdown(note)}`);
+      if (options.exportTemplate === "outline") {
+        lines.push(`${prefix}${labels.notes}${escapeMarkdown(note)}`);
+      } else {
+        lines.push(`${prefix}> ${labels.notes}${escapeMarkdown(note)}`);
+      }
     }
   }
+}
+
+function resolveSheetSeparator(options) {
+  if (options.exportTemplate === "outline") {
+    return "\n---\n";
+  }
+  return options.spacingMode === "compactSpacing" ? "\n---\n" : "\n\n---\n\n";
+}
+
+function formatNodeTitle(node, options) {
+  const baseTitle = escapeMarkdown(node.title || "Untitled");
+  if (options.exportTemplate === "test-analysis") {
+    return `测试点：${baseTitle}`;
+  }
+  return baseTitle;
+}
+
+function getTemplateAddonLabels(template) {
+  if (template === "document") {
+    return {
+      labels: "标签：",
+      markers: "标记：",
+      links: "相关链接：",
+      notes: "备注：",
+    };
+  }
+
+  if (template === "test-analysis") {
+    return {
+      labels: "测试标签：",
+      markers: "测试标记：",
+      links: "关联链接：",
+      notes: "说明：",
+    };
+  }
+
+  if (template === "outline") {
+    return {
+      labels: "[标签] ",
+      markers: "[标记] ",
+      links: "[链接]",
+      notes: "注：",
+    };
+  }
+
+  return {
+    labels: "Tags: ",
+    markers: "标记：",
+    links: "链接：",
+    notes: "备注：",
+  };
 }
 
 function splitNoteLines(notes) {
@@ -1087,14 +1641,16 @@ function normalizeJsonSheets(data) {
 function normalizeJsonTopic(topic) {
   if (!topic || typeof topic !== "object") return null;
 
-  const title = stringValue(topic.title) || "Untitled";
+  const rawTitle = stringValue(topic.title);
+  const title = rawTitle || "Untitled";
   const notes = extractJsonNotes(topic.notes);
+  const notePresent = hasJsonNotesPayload(topic.notes);
   const labels = extractJsonLabels(topic);
   const link = extractJsonLink(topic);
   const markers = extractJsonMarkers(topic);
   const children = collectJsonChildren(topic).map(normalizeJsonTopic).filter(Boolean);
 
-  return { title, notes, labels, link, markers, children };
+  return { title, rawTitle, notes, notePresent, labels, link, markers, children };
 }
 
 function collectJsonChildren(topic) {
@@ -1151,6 +1707,18 @@ function extractJsonNotes(notes) {
   }
 
   return "";
+}
+
+function hasJsonNotesPayload(notes) {
+  if (!notes) return false;
+  if (typeof notes === "string") return true;
+  if (typeof notes !== "object") return false;
+  if (Object.prototype.hasOwnProperty.call(notes, "plain")) return true;
+  if (Object.prototype.hasOwnProperty.call(notes, "realHTML")) return true;
+  if (Object.prototype.hasOwnProperty.call(notes, "html")) return true;
+  if (Object.prototype.hasOwnProperty.call(notes, "content")) return true;
+  if (Array.isArray(notes.ops)) return true;
+  return true;
 }
 
 function extractJsonLabels(topic) {
@@ -1297,8 +1865,10 @@ function normalizeXmlSheets(xmlText) {
 function normalizeXmlTopic(topicEl) {
   if (!topicEl) return null;
 
-  const title = directChildText(topicEl, "title") || "Untitled";
+  const rawTitle = directChildText(topicEl, "title");
+  const title = rawTitle || "Untitled";
   const notes = extractXmlNotes(topicEl);
+  const notePresent = hasXmlNotesPayload(topicEl);
   const labels = extractXmlLabels(topicEl);
   const link = extractXmlLink(topicEl);
   const markers = extractXmlMarkers(topicEl);
@@ -1318,7 +1888,9 @@ function normalizeXmlTopic(topicEl) {
 
   return {
     title,
+    rawTitle,
     notes,
+    notePresent,
     labels,
     link,
     markers,
@@ -1337,6 +1909,10 @@ function extractXmlNotes(topicEl) {
   if (htmlEl) return normalizeWhitespace(stripHtml(htmlEl.textContent || ""));
 
   return normalizeWhitespace(notesEl.textContent || "");
+}
+
+function hasXmlNotesPayload(topicEl) {
+  return directChildrenByName(topicEl, "notes").length > 0;
 }
 
 function extractXmlLabels(topicEl) {

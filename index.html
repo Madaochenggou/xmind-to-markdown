@@ -39,6 +39,22 @@
           </div>
 
           <h2 class="config-title">转换配置</h2>
+          <div class="template-row">
+            <label class="config-item" for="exportTemplate">
+              <span>导出模板</span>
+              <select id="exportTemplate">
+                <option value="standard">standard（通用）</option>
+                <option value="outline">outline（提纲）</option>
+                <option value="document">document（文档）</option>
+                <option value="test-analysis">test-analysis（测试分析）</option>
+              </select>
+            </label>
+            <button id="applyTemplateDefaultsBtn" class="secondary-btn" type="button">
+              应用模板默认设置
+            </button>
+          </div>
+          <p class="template-tip">切换模板仅改变模板类型，点击按钮可应用模板推荐配置。</p>
+
           <div class="config-grid">
             <label class="config-item" for="outputMode">
               <span>输出结构模式</span>
@@ -69,6 +85,22 @@
             <label class="checkbox"><input id="includeLabels" type="checkbox" checked />包含 Labels</label>
             <label class="checkbox"><input id="includeLinks" type="checkbox" checked />包含 Links</label>
             <label class="checkbox"><input id="includeMarkers" type="checkbox" checked />包含 Markers</label>
+          </div>
+
+          <h2 class="config-title config-subtitle">导出增强</h2>
+          <div class="config-checks export-checks">
+            <label class="checkbox">
+              <input id="includeFrontMatter" type="checkbox" />
+              导出包含 YAML Front Matter
+            </label>
+            <label class="checkbox">
+              <input id="includeCheckReport" type="checkbox" />
+              导出包含检查报告
+            </label>
+            <label class="checkbox">
+              <input id="exportIndexFile" type="checkbox" checked />
+              批量导出生成 index.md
+            </label>
           </div>
         </section>
 
@@ -107,6 +139,15 @@
             hidden
           ></textarea>
           <div id="markdownPreview" class="markdown-preview" hidden></div>
+
+          <div id="checkPanel" class="check-panel">
+            <div class="check-panel-head">
+              <h3>检查结果</h3>
+              <p id="checkSummary" class="check-summary">暂无检查结果</p>
+            </div>
+            <p id="checkEmpty" class="check-empty">请先选择并转换文件</p>
+            <ul id="checkIssueList" class="check-issue-list"></ul>
+          </div>
         </section>
       </div>
     </main>

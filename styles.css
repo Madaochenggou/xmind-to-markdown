@@ -232,6 +232,14 @@ button:disabled {
   color: var(--muted);
 }
 
+.warning-flag {
+  color: var(--warning);
+  background: #fff3cd;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -281,6 +289,31 @@ button:disabled {
   margin-top: 16px;
 }
 
+.config-subtitle {
+  margin-top: 14px;
+}
+
+.template-row {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.secondary-btn {
+  background: #fff;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  white-space: nowrap;
+}
+
+.template-tip {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .config-grid {
   margin-top: 12px;
   display: grid;
@@ -313,6 +346,10 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 12px;
+}
+
+.export-checks {
+  grid-template-columns: 1fr;
 }
 
 .checkbox {
@@ -381,6 +418,10 @@ button:disabled {
 
 .action-notice.error {
   color: var(--danger);
+}
+
+.action-notice.info {
+  color: var(--warning);
 }
 
 .stats-panel {
@@ -474,6 +515,79 @@ button:disabled {
   text-decoration: underline;
 }
 
+.check-panel {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fcfdff;
+  padding: 12px;
+}
+
+.check-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.check-panel h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.check-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.check-empty {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.check-issue-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.check-issue-list[hidden] {
+  display: none;
+}
+
+.check-issue-item + .check-issue-item {
+  margin-top: 8px;
+}
+
+.check-severity {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  margin-right: 8px;
+  font-size: 12px;
+  color: #fff;
+}
+
+.check-severity.warning {
+  background: #d97706;
+}
+
+.check-severity.info {
+  background: #2563eb;
+}
+
+.check-message {
+  color: var(--text);
+}
+
+.check-node-path {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 @media (max-width: 1120px) {
   .workspace {
     grid-template-columns: 1fr;
@@ -495,6 +609,10 @@ button:disabled {
   }
 
   .config-checks {
+    grid-template-columns: 1fr;
+  }
+
+  .template-row {
     grid-template-columns: 1fr;
   }
 
