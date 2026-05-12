@@ -1,0 +1,243 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Tenant {
+  id        String       @id @default(cuid())
+  name      String
+  code      String       @unique
+  status    String       @default("active")
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  shops         Shop[]
+  users         User[]
+  categories    Category[]
+  products      Product[]
+  skus          Sku[]
+  cartItems     CartItem[]
+  orders        Order[]
+  orderItems    OrderItem[]
+  payments      Payment[]
+  operationLogs OperationLog[]
+}
+
+model Shop {
+  id        String     @id @default(cuid())
+  tenantId  String
+  name      String
+  slug      String     @unique
+  logoUrl   String?
+  status    String     @default("active")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id])
+  categories Category[]
+  products   Product[]
+  skus       Sku[]
+  cartItems  CartItem[]
+  orders     Order[]
+  orderItems OrderItem[]
+  payments   Payment[]
+
+  @@index([tenantId])
+}
+
+model User {
+  id           String     @id @default(cuid())
+  tenantId     String?
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         String
+  status       String   @default("active")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  tenant        Tenant?        @relation(fields: [tenantId], references: [id])
+  cartItems     CartItem[]
+  orders        Order[]
+  operationLogs OperationLog[]
+
+  @@index([tenantId])
+}
+
+model Category {
+  id        String         @id @default(cuid())
+  tenantId  String
+  shopId    String
+  name      String
+  sort      Int            @default(0)
+  status    String         @default("active")
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  shop     Shop      @relation(fields: [shopId], references: [id])
+  products Product[]
+
+  @@index([tenantId, shopId])
+}
+
+model Product {
+  id          String        @id @default(cuid())
+  tenantId    String
+  shopId      String
+  categoryId  String
+  title       String
+  subtitle    String?
+  description String?
+  coverImage  String?
+  status      String        @default("draft")
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id])
+  shop       Shop        @relation(fields: [shopId], references: [id])
+  category   Category    @relation(fields: [categoryId], references: [id])
+  skus       Sku[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@index([tenantId, shopId])
+  @@index([categoryId])
+}
+
+model Sku {
+  id        String    @id @default(cuid())
+  tenantId  String
+  shopId    String
+  productId String
+  skuName   String
+  price     Int
+  stock     Int
+  status    String    @default("active")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id])
+  shop       Shop        @relation(fields: [shopId], references: [id])
+  product    Product     @relation(fields: [productId], references: [id])
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@index([tenantId, shopId, productId])
+}
+
+model CartItem {
+  id         String   @id @default(cuid())
+  tenantId   String
+  shopId     String
+  customerId String
+  productId  String
+  skuId      String
+  quantity   Int
+  selected   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+  shop     Shop    @relation(fields: [shopId], references: [id])
+  customer User    @relation(fields: [customerId], references: [id])
+  product  Product @relation(fields: [productId], references: [id])
+  sku      Sku     @relation(fields: [skuId], references: [id])
+
+  @@unique([shopId, customerId, skuId])
+  @@index([tenantId, shopId, customerId])
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  tenantId        String
+  shopId          String
+  customerId      String
+  orderNo         String      @unique
+  status          String      @default("pending_pay")
+  totalAmount     Int
+  payAmount       Int
+  receiverName    String
+  receiverPhone   String
+  receiverAddress String
+  paidAt          DateTime?
+  shippedAt       DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  tenant   Tenant      @relation(fields: [tenantId], references: [id])
+  shop     Shop        @relation(fields: [shopId], references: [id])
+  customer User        @relation(fields: [customerId], references: [id])
+  items    OrderItem[]
+  payments Payment[]
+
+  @@index([tenantId, shopId])
+  @@index([customerId])
+}
+
+model OrderItem {
+  id           String   @id @default(cuid())
+  tenantId     String
+  shopId       String
+  orderId      String
+  productId    String
+  skuId        String
+  productTitle String
+  skuName      String
+  price        Int
+  quantity     Int
+  totalAmount  Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  shop    Shop    @relation(fields: [shopId], references: [id])
+  order   Order   @relation(fields: [orderId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+  sku     Sku     @relation(fields: [skuId], references: [id])
+
+  @@index([tenantId, shopId, orderId])
+}
+
+model Payment {
+  id        String         @id @default(cuid())
+  tenantId  String
+  shopId    String
+  orderId   String
+  paymentNo String         @unique
+  amount    Int
+  status    String         @default("pending")
+  channel   String         @default("mock")
+  paidAt    DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  shop   Shop   @relation(fields: [shopId], references: [id])
+  order  Order  @relation(fields: [orderId], references: [id])
+
+  @@index([tenantId, shopId, orderId])
+}
+
+model OperationLog {
+  id         String   @id @default(cuid())
+  tenantId   String?
+  userId     String
+  action     String
+  targetType String
+  targetId   String
+  detail     String?
+  createdAt  DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+  user   User    @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId])
+}
